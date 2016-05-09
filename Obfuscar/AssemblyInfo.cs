@@ -58,13 +58,10 @@ namespace Obfuscar
 		private string filename;
 		private AssemblyDefinition definition;
 		private string name;
-		private bool exclude;
         private bool skipEnums;
 
-        public bool Exclude {
-			get { return exclude; }
-			set { exclude = value; }
-		}
+        public bool Exclude { get; set; }
+        public bool ReferencesOnly { get; set; }
 
 		bool initialized;
 		// to create, use FromXml
@@ -78,6 +75,13 @@ namespace Obfuscar
 			return def.Name.PublicKeyToken.Length != 0;
 		}
 
+        private void CheckSignedAssembly ()
+        {
+            if (AssemblyIsSigned (definition) && project.Settings.KeyFile == null) {
+                throw new ObfuscarException("Obfuscating a signed assembly would result in an invalid assembly:  " + name + "; use the KeyFile property to set a key to use");
+            }
+        }
+
 		public static AssemblyInfo FromXml (Project project, XmlReader reader, Variables vars)
 		{
 			Debug.Assert (reader.NodeType == XmlNodeType.Element && reader.Name == "Module");
@@ -88,9 +92,7 @@ namespace Obfuscar
 			string val = Helper.GetAttribute (reader, "file", vars);
 			if (val.Length > 0) {
 				info.LoadAssembly (val);
-
-				if (AssemblyIsSigned (info.Definition) && project.Settings.KeyFile == null)
-					throw new ObfuscarException ("Obfuscating a signed assembly would result in an invalid assembly:  " + info.Name + "; use the KeyFile property to set a key to use");
+                info.CheckSignedAssembly ();
 			} else
 				throw new InvalidOperationException ("Need valid file attribute.");
 
@@ -288,6 +290,15 @@ namespace Obfuscar
 
 			return info;
 		}
+
+        public static AssemblyInfo FromReference (string filePath, Project project)
+        {
+            var info = new AssemblyInfo (project);
+            info.LoadAssembly (filePath);
+            info.CheckSignedAssembly ();
+            info.ReferencesOnly = true;
+            return info;
+        }
 
 		/// <summary>
 		/// Called by project to finish initializing the assembly.

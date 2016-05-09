@@ -44,6 +44,7 @@ namespace Obfuscar
 		bool useKoreanNames;
 		bool xmlMapping;
 		bool hideStrings;
+        bool updateOtherModuleReferences;
 		bool optimize;
 		bool suppressIldasm;
 		bool renegerateDebugInfo;
@@ -65,6 +66,7 @@ namespace Obfuscar
 			useUnicodeNames = XmlConvert.ToBoolean (vars.GetValue ("UseUnicodeNames", "false"));
 			useKoreanNames = XmlConvert.ToBoolean (vars.GetValue ("UseKoreanNames", "false"));
 			hideStrings = XmlConvert.ToBoolean (vars.GetValue ("HideStrings", "true"));
+            updateOtherModuleReferences = XmlConvert.ToBoolean (vars.GetValue ("UpdateOtherModuleReferences", "false"));
 			optimize = XmlConvert.ToBoolean (vars.GetValue ("OptimizeMethods", "true"));
 			suppressIldasm = XmlConvert.ToBoolean (vars.GetValue ("SuppressIldasm", "true"));
 
@@ -121,6 +123,10 @@ namespace Obfuscar
 		public bool HideStrings {
 			get { return hideStrings; }
 		}
+
+        public bool UpdateOtherModuleReferences {
+            get { return updateOtherModuleReferences; }
+        }
 
 		public bool Optimize {
 			get { return optimize; }

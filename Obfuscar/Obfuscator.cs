@@ -99,7 +99,7 @@ namespace Obfuscar
 
 		public void RunRules ()
 		{
-			// The SemanticAttributes of MethodDefinitions have to be loaded before any fields,properties or events are removed
+			// The SemanticAttributes of MethodDefinitions have to be loaded before any fields, properties or events are removed
 			LoadMethodSemantics ();
 
 			LogOutput("hiding strings...\n");
@@ -186,7 +186,7 @@ namespace Obfuscar
 			string outPath = Project.Settings.OutPath;
 
 			//copy excluded assemblies
-			foreach (AssemblyInfo copyInfo in Project.CopyAssemblyList) {
+			foreach (AssemblyInfo copyInfo in Project.CopiedAssemblies) {
 				var fileName = Path.GetFileName (copyInfo.Filename);
 				// ReSharper disable once InvocationIsSkipped
 				Debug.Assert (fileName != null, "fileName != null");
@@ -311,6 +311,9 @@ namespace Obfuscar
             }
 
             foreach (var info in Project) {
+                if (info.ReferencesOnly)
+                    continue;
+
 				// loop through the types
 				foreach (var type in info.GetAllTypeDefinitions()) {
 					if (type.FullName == "<Module>") {
@@ -380,6 +383,9 @@ namespace Obfuscar
 		public void RenameParams ()
 		{
 			foreach (AssemblyInfo info in Project) {
+                if (info.ReferencesOnly)
+                    continue;
+
 				// loop through the types
 				foreach (TypeDefinition type in info.GetAllTypeDefinitions()) {
 					if (type.FullName == "<Module>") {
@@ -426,6 +432,9 @@ namespace Obfuscar
 		{
 			//var typerenamemap = new Dictionary<string, string> (); // For patching the parameters of typeof(xx) attribute constructors
 			foreach (AssemblyInfo info in Project) {
+                if (info.ReferencesOnly)
+                    continue;
+
 				AssemblyDefinition library = info.Definition;
 
 				// make a list of the resources that can be renamed
@@ -564,7 +573,7 @@ namespace Obfuscar
 			}
 		}
 
-		private HashSet<string> NamesInXaml (List<XDocument> xamlFiles)
+		private static HashSet<string> NamesInXaml (List<XDocument> xamlFiles)
 		{
 			var result = new HashSet<string> ();
 			if (xamlFiles.Count == 0)
@@ -653,7 +662,7 @@ namespace Obfuscar
 			Mapping.UpdateType (unrenamedTypeKey, ObfuscationStatus.Renamed, string.Format ("[{0}]{1}", newTypeKey.Scope, type));
 		}
 
-		private Dictionary<ParamSig, NameGroup> GetSigNames (Dictionary<TypeKey, Dictionary<ParamSig, NameGroup>> baseSigNames, TypeKey typeKey)
+		private static Dictionary<ParamSig, NameGroup> GetSigNames (Dictionary<TypeKey, Dictionary<ParamSig, NameGroup>> baseSigNames, TypeKey typeKey)
 		{
 			Dictionary<ParamSig, NameGroup> sigNames;
 			if (!baseSigNames.TryGetValue (typeKey, out sigNames)) {
@@ -664,12 +673,12 @@ namespace Obfuscar
 			return sigNames;
 		}
 
-		private NameGroup GetNameGroup (Dictionary<TypeKey, Dictionary<ParamSig, NameGroup>> baseSigNames, TypeKey typeKey, ParamSig sig)
+		private static NameGroup GetNameGroup (Dictionary<TypeKey, Dictionary<ParamSig, NameGroup>> baseSigNames, TypeKey typeKey, ParamSig sig)
 		{
 			return GetNameGroup (GetSigNames (baseSigNames, typeKey), sig);
 		}
 
-		private NameGroup GetNameGroup<TKeyType> (Dictionary<TKeyType, NameGroup> sigNames, TKeyType sig)
+		private static NameGroup GetNameGroup<TKeyType> (Dictionary<TKeyType, NameGroup> sigNames, TKeyType sig)
 		{
 			NameGroup nameGroup;
 			if (!sigNames.TryGetValue (sig, out nameGroup)) {
@@ -746,7 +755,7 @@ namespace Obfuscar
 				var newName = NameMaker.UniqueName (Project.Settings.ReuseNames ? index++ : _uniqueMemberNameIndex++);
 				RenameProperty (info, propKey, prop, newName);
 			} else {
-				// add to to collection for removal
+				// add to collection for removal
 				propsToDrop.Add (prop);
 			}
 			return index;
@@ -784,6 +793,9 @@ namespace Obfuscar
 			}
 
 			foreach (AssemblyInfo info in Project) {
+                if (info.ReferencesOnly)
+                    continue;
+
 				foreach (TypeDefinition type in info.GetAllTypeDefinitions()) {
 					if (type.FullName == "<Module>") {
 						continue;
@@ -862,8 +874,11 @@ namespace Obfuscar
 						}
 					}
 				}
+            }
 
-				foreach (TypeDefinition type in info.GetAllTypeDefinitions()) {
+            foreach (AssemblyInfo info in Project)
+            {
+                foreach (TypeDefinition type in info.GetAllTypeDefinitions()) {
 					if (type.FullName == "<Module>") {
 						continue;
 					}
@@ -880,6 +895,10 @@ namespace Obfuscar
 						if (m.Status == ObfuscationStatus.Skipped) {
 							continue;
 						}
+
+                        if (m.Status == ObfuscationStatus.Unknown && info.ReferencesOnly) {
+                            continue;
+                        }
 
 						if (method.IsSpecialName) {
 							switch (method.SemanticsAttributes) {
@@ -916,26 +935,30 @@ namespace Obfuscar
 				return;
 			}
 
+            if (info.ReferencesOnly) {
+                return;
+            }
+
 			// skip filtered methods
-			string skiprename;
-			var toDo = info.ShouldSkip (methodKey, Project.InheritMap, Project.Settings.KeepPublicApi,
-						   Project.Settings.HidePrivateApi, Project.Settings.MarkedOnly, out skiprename);
-			if (!toDo)
-				skiprename = null;
+			string skipRename;
+			var skip = info.ShouldSkip (methodKey, Project.InheritMap, Project.Settings.KeepPublicApi,
+						   Project.Settings.HidePrivateApi, Project.Settings.MarkedOnly, out skipRename);
+			if (!skip)
+				skipRename = null;
 			// update status for skipped non-virtual methods immediately...status for
 			// skipped virtual methods gets updated in RenameVirtualMethod
 			if (!method.IsVirtual) {
-				if (skiprename != null) {
-					m.Update (ObfuscationStatus.Skipped, skiprename);
+				if (skipRename != null) {
+					m.Update (ObfuscationStatus.Skipped, skipRename);
 				}
 
 				return;
 			}
 
 			// if we need to skip the method or we don't yet have a name planned for a method, rename it
-			if ((skiprename != null && m.Status != ObfuscationStatus.Skipped) ||
+			if ((skipRename != null && m.Status != ObfuscationStatus.Skipped) ||
 				m.Status == ObfuscationStatus.Unknown) {
-				RenameVirtualMethod (baseSigNames, methodKey, method, skiprename);
+				RenameVirtualMethod (baseSigNames, methodKey, method, skipRename);
 			}
 		}
 
@@ -1062,7 +1085,7 @@ namespace Obfuscar
 			return t.StatusText;
 		}
 
-		private string GetNewName (Dictionary<ParamSig, NameGroup> sigNames, MethodDefinition method)
+		private static string GetNewName (Dictionary<ParamSig, NameGroup> sigNames, MethodDefinition method)
 		{
 			// counts are grouping according to signature
 			ParamSig sig = new ParamSig (method);
@@ -1132,6 +1155,9 @@ namespace Obfuscar
 		internal void HideStrings ()
 		{
 			foreach (AssemblyInfo info in Project) {
+                if (info.ReferencesOnly)
+                    continue;
+
 				AssemblyDefinition library = info.Definition;
 				StringSqueeze container = new StringSqueeze (library);
 
@@ -1191,7 +1217,7 @@ namespace Obfuscar
 
 		private class StringSqueeze
 		{
-			public TypeDefinition NewType { get; private set; }
+			private TypeDefinition NewType { get; set; }
 
 			private TypeDefinition StructType { get; set; }
 

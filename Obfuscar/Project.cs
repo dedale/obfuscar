@@ -25,6 +25,7 @@ using Mono.Cecil;
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using System.IO;
 using System.Linq;
 using System.Security.Cryptography;
@@ -38,13 +39,13 @@ namespace Obfuscar
 		private const string SPECIALVAR_PROJECTFILEDIRECTORY = "ProjectFileDirectory";
 		private readonly List<AssemblyInfo> assemblyList = new List<AssemblyInfo> ();
 
-		public List<AssemblyInfo> CopyAssemblyList {
+		public IEnumerable<AssemblyInfo> CopiedAssemblies {
 			get {
-				return copyAssemblyList;
+				return copiedAssemblies.Values;
 			}
 		}
 
-		private readonly List<AssemblyInfo> copyAssemblyList = new List<AssemblyInfo> ();
+		private readonly Dictionary<string, AssemblyInfo> copiedAssemblies = new Dictionary<string, AssemblyInfo> ();
 		private readonly Dictionary<string, AssemblyInfo> assemblyMap = new Dictionary<string, AssemblyInfo> ();
 		private readonly Variables vars = new Variables ();
 		InheritMap inheritMap;
@@ -62,7 +63,7 @@ namespace Obfuscar
 			}
 		}
 
-		public string KeyContainerName = null;
+		public string KeyContainerName;
 		public byte[] keyPair;
 
 		public byte[] KeyPair {
@@ -149,7 +150,7 @@ namespace Obfuscar
 					case "Module":
 						AssemblyInfo info = AssemblyInfo.FromXml (project, reader, project.vars);
 						if (info.Exclude) {
-							project.copyAssemblyList.Add (info);
+							project.copiedAssemblies.Add (info.Name, info);
 							break;
 						}
 						Console.WriteLine ("Processing assembly: " + info.Definition.Name.FullName);
@@ -160,12 +161,220 @@ namespace Obfuscar
 				}
 			}
 
+            if (project.Settings.UpdateOtherModuleReferences) {
+                project.AddReferencingAssemblies ();
+            }
+
 			return project;
 		}
 
-		private class Graph
+        private sealed class InputAssemblyVertex
+        {
+            private readonly HashSet<string> references = new HashSet<string> ();
+            private readonly string path;
+            private readonly string name;
+            private readonly bool mixed;
+            public InputAssemblyVertex (string path)
+            {
+                this.path = path;
+                var assemblyDef = AssemblyDefinition.ReadAssembly (path);
+                name = assemblyDef.Name.Name;
+                foreach (var reference in assemblyDef.MainModule.AssemblyReferences) {
+                    references.Add (reference.Name);
+                }
+                mixed = (assemblyDef.MainModule.Attributes & ModuleAttributes.ILOnly) == 0;
+            }
+            public string FilePath { get { return path; } }
+            public string Name { get { return name; } }
+            public bool IsMixed { get { return mixed; } }
+            public IEnumerable<string> References {  get { return references; } }
+        }
+
+        private sealed class InputAssemblyVertexCollection : KeyedCollection<string, InputAssemblyVertex>
+        {
+            protected override string GetKeyForItem (InputAssemblyVertex item)
+            {
+                return item.Name;
+            }
+        }
+
+        private sealed class InputAssemblyGraph
+        {
+            private sealed class Index
+            {
+                private readonly Dictionary<string, int> indexOf = new Dictionary<string, int> ();
+                private readonly string[] nameOf;
+                public Index (ICollection<string> names)
+                {
+                    nameOf = new string [names.Count];
+                    foreach (var name in names) {
+                        var index = indexOf.Count;
+                        nameOf [index] = name;
+                        indexOf.Add (name, index);
+                    }
+                }
+                public int this [string name] { get { return indexOf [name]; } }
+                public string this [int index] { get { return nameOf [index]; } }
+                public int Count { get { return nameOf.Length; } }
+            }
+
+            private sealed class AdjacencyList
+            {
+                private readonly HashSet<int>[] content;
+                private readonly HashSet<int> roots;
+                private readonly Index index;
+                private AdjacencyList (HashSet<int>[] content, HashSet<int> roots, Index index)
+                {
+                    this.content = content;
+                    this.roots = roots;
+                    this.index = index;
+                }
+                private static HashSet<int>[] CreateEmpty (int count)
+                {
+                    var array = new HashSet<int> [count];
+                    for (int i = 0; i < count; i++) {
+                        array [i] = new HashSet<int> ();
+                    }
+                    return array;
+                }
+                public static AdjacencyList Create (ICollection<InputAssemblyVertex> assemblyVertices, Index index)
+                {
+                    var roots = new HashSet<int> (Enumerable.Range (0, assemblyVertices.Count));
+                    var content = CreateEmpty (index.Count);
+                    foreach (var assemblyVertex in assemblyVertices) {
+                        var children = assemblyVertex.References.Select (r => index [r]).ToList ();
+                        content [index [assemblyVertex.Name]].AddRange (children);
+                        roots.RemoveRange (children);
+                    }
+                    return new AdjacencyList (content, roots, index);
+                }
+                public AdjacencyList Reverse ()
+                {
+                    var newRoots = new HashSet<int> ();
+                    var reversed = CreateEmpty (index.Count);
+                    for (int i = 0; i < content.Length; i++) {
+                        if (content [i].Count == 0) {
+                            newRoots.Add (i);
+                        } else {
+                            foreach (var j in content [i]) {
+                                reversed [j].Add (i);
+                            }
+                        }
+                    }
+                    return new AdjacencyList (reversed, newRoots, index);
+                }
+                public void Bfs (Action<string, string> visit)
+                {
+                    var visited = new bool [content.Length];
+                    var queue = new Queue<int> (roots);
+                    while (queue.Count > 0) {
+                        var vertex = queue.Dequeue ();
+                        if (!visited [vertex]) {
+                            visited [vertex] = true;
+                            foreach (var child in content [vertex]) {
+                                if (visit != null) {
+                                    visit (index [vertex], index [child]);
+                                }
+                                if (!visited [child]) {
+                                    queue.Enqueue (child);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            private readonly InputAssemblyVertexCollection assemblyVertices;
+            private readonly HashSet<string> obfuscated;
+            private HashSet<string> GetAllNames ()
+            {
+                var all = new HashSet<string> ();
+                foreach (var vertex in assemblyVertices) {
+                    all.Add (vertex.Name);
+                    all.AddRange (vertex.References);
+                }
+                return all;
+            }
+            private void Visit (HashSet<string> referencing, string fromName, string toName)
+            {
+                if (obfuscated.Contains (fromName) && !obfuscated.Contains (toName)) {
+                    referencing.Add (toName);
+                }
+            }
+            private IEnumerable<string> FindReferencingAssemblyNames ()
+            {
+                var referencing = new HashSet<string> ();
+                var allNames = GetAllNames ();
+                var index = new Index (allNames);
+                var adjacencyList = AdjacencyList.Create (assemblyVertices, index);
+                var reverseAdjacencyList = adjacencyList.Reverse ();
+                reverseAdjacencyList.Bfs ( (from, to) => Visit (referencing, from, to));
+                return referencing;
+            }
+            public InputAssemblyGraph (Project project)
+            {
+                assemblyVertices = project.LoadVertices ();
+                obfuscated = new HashSet<string> (project.assemblyMap.Keys);
+            }
+            public IEnumerable<string> FindReferencingAssemblyPaths ()
+            {
+                return FindReferencingAssemblyNames ().Select (n => assemblyVertices [n].FilePath);
+            }
+            public bool IsMixed (string name)
+            {
+                return assemblyVertices [name].IsMixed;
+            }
+        }
+
+        private InputAssemblyVertexCollection LoadVertices ()
+        {
+            var vertices = new InputAssemblyVertexCollection ();
+            foreach (var binaryPath in GetInPathBinaries ()) {
+                try {
+                    vertices.Add (new InputAssemblyVertex (binaryPath));
+                } catch (BadImageFormatException) {
+                }
+            }
+            return vertices;
+        }
+
+        private void AddReferencingAssemblies ()
+        {
+            var graph = new InputAssemblyGraph (this);
+            foreach (var filePath in graph.FindReferencingAssemblyPaths ()) { 
+                var info = AssemblyInfo.FromReference (filePath, this);
+                if (graph.IsMixed (info.Name)) { 
+                    Console.WriteLine ("Will not update references in '{0}' (mixed mode assemblies are not supported)", info.Name);
+                } else {
+                    Console.WriteLine("Processing assembly: " + info.Definition.Name.FullName);
+                    assemblyList.Add (info);
+                    assemblyMap[info.Name] = info;
+                }
+            }
+        }
+
+        private IEnumerable<string> GetInPathBinaries ()
+        { 
+            foreach (var path in Directory.GetFiles (Settings.InPath)) { 
+                if (IsBinaryFile (path)) {
+                    yield return path;
+                }
+            }
+        }
+
+        private static bool IsBinaryFile (string path)
+        {
+            var extension = Path.GetExtension (path);
+            if (extension != null) {
+                extension = extension.ToLowerInvariant ();
+                return extension == ".dll" || extension == ".exe";
+            }
+            return false;
+        }
+
+        private class Graph
 		{
-			public List<Node<AssemblyInfo>> Root = new List<Node<AssemblyInfo>> ();
+			private readonly List<Node<AssemblyInfo>> Root = new List<Node<AssemblyInfo>> ();
 
 			public Graph (List<AssemblyInfo> items)
 			{
@@ -198,7 +407,7 @@ namespace Obfuscar
 				return result;
 			}
 
-			private void CleanPool (List<Node<AssemblyInfo>> pool, List<AssemblyInfo> result)
+			private static void CleanPool (List<Node<AssemblyInfo>> pool, List<AssemblyInfo> result)
 			{
 				while (pool.Count > 0) {
 					var toRemoved = new List<Node<AssemblyInfo>> ();
@@ -338,4 +547,20 @@ namespace Obfuscar
 			return assemblyList.GetEnumerator ();
 		}
 	}
+
+    public static class HashSetExtensions
+    {
+        public static void AddRange<T> (this HashSet<T> set, IEnumerable<T> items)
+        {
+            foreach (var item in items) {
+                set.Add (item);
+            }
+        }
+        public static void RemoveRange<T> (this HashSet<T> set, IEnumerable<T> items)
+        {
+            foreach (var item in items) {
+                set.Remove (item);
+            }
+        }
+    }
 }
