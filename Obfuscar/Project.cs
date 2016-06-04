@@ -162,7 +162,7 @@ namespace Obfuscar
 			}
 
             if (project.Settings.UpdateOtherModuleReferences) {
-                project.AddReferencingAssemblies ();
+                //project.AddReferencingAssemblies ();
             }
 
 			return project;

@@ -296,7 +296,7 @@ namespace Obfuscar
             var info = new AssemblyInfo (project);
             info.LoadAssembly (filePath);
             info.CheckSignedAssembly ();
-            info.ReferencesOnly = true;
+            //info.ReferencesOnly = true;
             return info;
         }
 

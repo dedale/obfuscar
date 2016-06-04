@@ -311,8 +311,8 @@ namespace Obfuscar
             }
 
             foreach (var info in Project) {
-                if (info.ReferencesOnly)
-                    continue;
+                //if (info.ReferencesOnly)
+                //    continue;
 
 				// loop through the types
 				foreach (var type in info.GetAllTypeDefinitions()) {
@@ -383,8 +383,8 @@ namespace Obfuscar
 		public void RenameParams ()
 		{
 			foreach (AssemblyInfo info in Project) {
-                if (info.ReferencesOnly)
-                    continue;
+                //if (info.ReferencesOnly)
+                //    continue;
 
 				// loop through the types
 				foreach (TypeDefinition type in info.GetAllTypeDefinitions()) {
@@ -432,8 +432,8 @@ namespace Obfuscar
 		{
 			//var typerenamemap = new Dictionary<string, string> (); // For patching the parameters of typeof(xx) attribute constructors
 			foreach (AssemblyInfo info in Project) {
-                if (info.ReferencesOnly)
-                    continue;
+                //if (info.ReferencesOnly)
+                //    continue;
 
 				AssemblyDefinition library = info.Definition;
 
@@ -793,8 +793,8 @@ namespace Obfuscar
 			}
 
 			foreach (AssemblyInfo info in Project) {
-                if (info.ReferencesOnly)
-                    continue;
+                //if (info.ReferencesOnly)
+                //    continue;
 
 				foreach (TypeDefinition type in info.GetAllTypeDefinitions()) {
 					if (type.FullName == "<Module>") {
@@ -897,7 +897,7 @@ namespace Obfuscar
 						}
 
                         if (m.Status == ObfuscationStatus.Unknown && info.ReferencesOnly) {
-                            continue;
+                            //continue;
                         }
 
 						if (method.IsSpecialName) {
@@ -936,7 +936,7 @@ namespace Obfuscar
 			}
 
             if (info.ReferencesOnly) {
-                return;
+                //return;
             }
 
 			// skip filtered methods
@@ -1155,8 +1155,8 @@ namespace Obfuscar
 		internal void HideStrings ()
 		{
 			foreach (AssemblyInfo info in Project) {
-                if (info.ReferencesOnly)
-                    continue;
+                //if (info.ReferencesOnly)
+                //    continue;
 
 				AssemblyDefinition library = info.Definition;
 				StringSqueeze container = new StringSqueeze (library);
