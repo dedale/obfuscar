@@ -263,7 +263,28 @@ namespace Obfuscar
                     }
                     return new AdjacencyList (reversed, newRoots, index);
                 }
-                public void Bfs (Action<string, string> visit)
+                private IEnumerable<int> Dfs (int start, bool[] visited)
+                {
+                    if (!visited [start]) {
+                        visited [start] = true;
+                        foreach (int c in content [start]) {
+                            foreach (var v in Dfs (c, visited)) {
+                                yield return v;
+                            }
+                        }
+                        yield return start;
+                    }
+                }
+                public IEnumerable<string> Dfs ()
+                {
+                    var visited = new bool [index.Count];
+                    foreach (var r in roots) {
+                        foreach (var v in Dfs (r, visited)) {
+                            yield return index[v];
+                        }
+                    }
+                }
+                /*public void Bfs (Action<string, string> visit)
                 {
                     var visited = new bool [content.Length];
                     var queue = new Queue<int> (roots);
@@ -280,6 +301,12 @@ namespace Obfuscar
                                 }
                             }
                         }
+                    }
+                }*/
+                public IEnumerable<string> GetChildren (string name)
+                {
+                    foreach (int c in content [index [name]]) {
+                        yield return index [c];
                     }
                 }
             }
@@ -303,13 +330,22 @@ namespace Obfuscar
             }
             private IEnumerable<string> FindReferencingAssemblyNames ()
             {
-                var referencing = new HashSet<string> ();
+                //var referencing = new HashSet<string> ();
                 var allNames = GetAllNames ();
                 var index = new Index (allNames);
                 var adjacencyList = AdjacencyList.Create (assemblyVertices, index);
                 var reverseAdjacencyList = adjacencyList.Reverse ();
-                reverseAdjacencyList.Bfs ( (from, to) => Visit (referencing, from, to));
-                return referencing;
+                //reverseAdjacencyList.Bfs ( (from, to) => Visit (referencing, from, to));
+                foreach (var name in adjacencyList.Dfs ()) {
+                    if (obfuscated.Contains (name)) {
+                        foreach (var other in reverseAdjacencyList.GetChildren (name)) {
+                            if (!obfuscated.Contains (other)) {
+                                yield return other;
+                            }
+                        }
+                    }
+                }
+                //return referencing;
             }
             public InputAssemblyGraph (Project project)
             {
